@@ -3,7 +3,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-import { PaperAirplaneIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, ArrowDownTrayIcon } from '@heroicons/react/24/solid';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -31,17 +33,42 @@ const systemPrompt = `You are EduAI, an intelligent and supportive educational a
 
 Always maintain an encouraging and patient demeanor. If a student is struggling, break down the concept into smaller, more digestible parts.`;
 
+// Maximum number of messages to keep in context
+const MAX_CONTEXT_MESSAGES = 10;
+
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState('');
   const [isPuterLoaded, setIsPuterLoaded] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Load chat history from localStorage when component mounts
+  useEffect(() => {
+    const savedMessages = localStorage.getItem('chatHistory');
+    if (savedMessages) {
+      try {
+        const parsedMessages = JSON.parse(savedMessages);
+        setMessages(parsedMessages);
+      } catch (error) {
+        console.error('Error parsing saved messages:', error);
+      }
+    }
+  }, []);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('chatHistory', JSON.stringify(messages));
+    }
+  }, [messages]);
 
   useEffect(() => {
     scrollToBottom();
@@ -75,6 +102,29 @@ export default function Chat() {
     return () => clearInterval(interval);
   }, []);
 
+  // Function to build the prompt with context from previous messages
+  const buildPromptWithContext = (userInput: string) => {
+    // Get the most recent messages for context (limited to MAX_CONTEXT_MESSAGES)
+    const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES);
+    
+    // Start with the system prompt
+    let fullPrompt = `${systemPrompt}\n\n`;
+    
+    // Add context from previous messages
+    if (recentMessages.length > 0) {
+      fullPrompt += "Previous conversation:\n";
+      recentMessages.forEach(msg => {
+        fullPrompt += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+      });
+      fullPrompt += "\n";
+    }
+    
+    // Add the current user input
+    fullPrompt += `User: ${userInput}`;
+    
+    return fullPrompt;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || !isPuterLoaded) return;
@@ -86,8 +136,8 @@ export default function Chat() {
     setCurrentStreamingMessage('');
 
     try {
-      // Combine system prompt with user input
-      const fullPrompt = `${systemPrompt}\n\nUser: ${input}`;
+      // Build prompt with context from previous messages
+      const fullPrompt = buildPromptWithContext(input);
       
       // Use streaming for better UX
       const response = await window.puter.ai.chat(fullPrompt, { stream: true });
@@ -113,12 +163,188 @@ export default function Chat() {
     }
   };
 
+  // Function to clear chat history
+  const clearChatHistory = () => {
+    setMessages([]);
+    localStorage.removeItem('chatHistory');
+  };
+
+  // Function to download chat history as PDF
+  const downloadChatAsPDF = async () => {
+    if (messages.length === 0) return;
+    
+    setIsGeneratingPDF(true);
+    
+    try {
+      const chatElement = chatContainerRef.current;
+      if (!chatElement) {
+        throw new Error('Chat container not found');
+      }
+      
+      // Create a timestamp for the filename
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `eduai-chat-${timestamp}.pdf`;
+      
+      // Create a clone of the chat container with simplified styling
+      const clonedChat = document.createElement('div');
+      clonedChat.style.padding = '20px';
+      clonedChat.style.backgroundColor = '#ffffff';
+      clonedChat.style.color = '#000000';
+      clonedChat.style.fontFamily = 'Arial, sans-serif';
+      clonedChat.style.width = '800px';
+      
+      // Add title to the cloned element
+      const titleElement = document.createElement('h1');
+      titleElement.textContent = 'EduAI Chat History';
+      titleElement.style.textAlign = 'center';
+      titleElement.style.marginBottom = '5px';
+      titleElement.style.fontSize = '24px';
+      clonedChat.appendChild(titleElement);
+      
+      // Add timestamp
+      const timestampElement = document.createElement('p');
+      timestampElement.textContent = `Generated: ${new Date().toLocaleString()}`;
+      timestampElement.style.textAlign = 'center';
+      timestampElement.style.marginBottom = '20px';
+      timestampElement.style.fontSize = '14px';
+      clonedChat.appendChild(timestampElement);
+      
+      // Add a horizontal line
+      const hrElement = document.createElement('hr');
+      hrElement.style.marginBottom = '20px';
+      hrElement.style.border = '1px solid #cccccc';
+      clonedChat.appendChild(hrElement);
+      
+      // Add messages with simplified styling
+      const messagesContainer = document.createElement('div');
+      messagesContainer.style.display = 'flex';
+      messagesContainer.style.flexDirection = 'column';
+      messagesContainer.style.gap = '15px';
+      
+      messages.forEach(message => {
+        const messageElement = document.createElement('div');
+        messageElement.style.maxWidth = '80%';
+        messageElement.style.padding = '10px';
+        messageElement.style.borderRadius = '8px';
+        messageElement.style.marginBottom = '10px';
+        
+        if (message.role === 'user') {
+          messageElement.style.alignSelf = 'flex-end';
+          messageElement.style.backgroundColor = '#2563eb';
+          messageElement.style.color = '#ffffff';
+        } else {
+          messageElement.style.alignSelf = 'flex-start';
+          messageElement.style.backgroundColor = '#f3f4f6';
+          messageElement.style.color = '#000000';
+        }
+        
+        const roleLabel = document.createElement('div');
+        roleLabel.textContent = message.role === 'user' ? 'You:' : 'EduAI:';
+        roleLabel.style.fontWeight = 'bold';
+        roleLabel.style.marginBottom = '5px';
+        messageElement.appendChild(roleLabel);
+        
+        const contentElement = document.createElement('div');
+        contentElement.textContent = message.content;
+        contentElement.style.whiteSpace = 'pre-wrap';
+        messageElement.appendChild(contentElement);
+        
+        messagesContainer.appendChild(messageElement);
+      });
+      
+      clonedChat.appendChild(messagesContainer);
+      
+      // Temporarily append to document (hidden) for html2canvas to work
+      clonedChat.style.position = 'absolute';
+      clonedChat.style.left = '-9999px';
+      document.body.appendChild(clonedChat);
+      
+      // Create PDF
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // Capture the cloned chat content
+      const canvas = await html2canvas(clonedChat, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      
+      // Remove the cloned element from DOM
+      document.body.removeChild(clonedChat);
+      
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Calculate dimensions to fit on PDF
+      const imgWidth = 170;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 20; // Start position
+      
+      // Add first page
+      pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+      heightLeft -= (pageHeight - position);
+      
+      // Add new pages if content overflows
+      while (heightLeft > 0) {
+        position = 20; // Reset position for new pages
+        pdf.addPage();
+        pdf.addImage(
+          imgData, 
+          'PNG', 
+          20, 
+          position - (pageHeight - 20) * (imgHeight - heightLeft) / imgHeight, 
+          imgWidth, 
+          imgHeight
+        );
+        heightLeft -= (pageHeight - position);
+      }
+      
+      // Save the PDF
+      pdf.save(filename);
+    } catch (error: any) {
+      console.error('Error generating PDF:', error);
+      alert(`Failed to generate PDF: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[80vh] max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg">
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex justify-between items-center p-4 border-b dark:border-gray-600">
+        <h2 className="text-lg font-semibold">Chat with EduAI</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={downloadChatAsPDF}
+            className="text-sm px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1"
+            disabled={messages.length === 0 || isGeneratingPDF}
+          >
+            {isGeneratingPDF ? 'Generating...' : 'Download PDF'}
+            <ArrowDownTrayIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={clearChatHistory}
+            className="text-sm px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+            disabled={messages.length === 0}
+          >
+            Clear History
+          </button>
+        </div>
+      </div>
+      <div 
+        ref={chatContainerRef}
+        className="flex-1 overflow-y-auto p-6 space-y-4"
+      >
         {!isPuterLoaded && (
           <div className="text-center p-4 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
             Loading Puter.js... Please wait.
+          </div>
+        )}
+        {messages.length === 0 && isPuterLoaded && (
+          <div className="text-center p-4 text-gray-500 dark:text-gray-400">
+            Start a conversation with EduAI. Your chat history will be saved.
           </div>
         )}
         {messages.map((message, index) => (
