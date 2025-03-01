@@ -14,6 +14,7 @@ declare global {
   interface Window {
     puter: {
       ai: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         chat: (prompt: string, options?: { stream: boolean }) => Promise<any>;
       };
     };
