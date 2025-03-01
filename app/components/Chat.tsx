@@ -12,12 +12,20 @@ interface Message {
   content: string;
 }
 
+// Define a type for the streaming response part
+interface ChatResponsePart {
+  text?: string;
+  [key: string]: unknown;
+}
+
+// Define a type for the async iterable response
+type AsyncIterableResponse = AsyncIterable<ChatResponsePart>;
+
 declare global {
   interface Window {
     puter: {
       ai: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        chat: (prompt: string, options?: { stream: boolean }) => Promise<any>;
+        chat: (prompt: string, options?: { stream: boolean }) => Promise<unknown>;
       };
     };
   }
@@ -143,7 +151,8 @@ export default function Chat() {
       const response = await window.puter.ai.chat(fullPrompt, { stream: true });
       
       let fullResponse = '';
-      for await (const part of response) {
+      // Use type assertion to tell TypeScript that response is an AsyncIterable
+      for await (const part of response as AsyncIterableResponse) {
         fullResponse += part?.text || '';
         setCurrentStreamingMessage(fullResponse);
       }
@@ -221,6 +230,53 @@ export default function Chat() {
       messagesContainer.style.flexDirection = 'column';
       messagesContainer.style.gap = '15px';
       
+      // Helper function to convert markdown to HTML
+      const markdownToHTML = (markdown: string) => {
+        // Simple markdown conversion for PDF
+        // Convert headers
+        let html = markdown
+          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+          .replace(/^# (.*$)/gim, '<h1>$1</h1>');
+          
+        // Convert bold and italic
+        html = html
+          .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+          .replace(/__(.*?)__/gim, '<strong>$1</strong>')
+          .replace(/_(.*?)_/gim, '<em>$1</em>');
+          
+        // Convert lists
+        html = html
+          .replace(/^\s*\n\* (.*)/gim, '<ul>\n<li>$1</li>')
+          .replace(/^\s*\n- (.*)/gim, '<ul>\n<li>$1</li>');
+          
+        // Convert numbered lists
+        html = html
+          .replace(/^\s*\n\d\. (.*)/gim, '<ol>\n<li>$1</li>');
+          
+        // Convert code blocks
+        html = html
+          .replace(/```([\s\S]*?)```/gim, '<pre><code>$1</code></pre>')
+          .replace(/`([^`]+)`/gim, '<code>$1</code>');
+          
+        // Convert paragraphs
+        html = html
+          .replace(/^\s*\n(?!\s*$)/gim, '</p>\n<p>')
+          .replace(/^\s*$/gim, '</p>\n<p>');
+          
+        // Wrap with paragraph tags
+        html = '<p>' + html + '</p>';
+        
+        // Fix any broken tags
+        html = html
+          .replace(/<\/p>\s*<\/p>/gim, '</p>')
+          .replace(/<p>\s*<\/p>/gim, '')
+          .replace(/<\/p>\s*<p>/gim, '<br>');
+          
+        return html;
+      };
+      
       messages.forEach(message => {
         const messageElement = document.createElement('div');
         messageElement.style.maxWidth = '80%';
@@ -245,10 +301,48 @@ export default function Chat() {
         messageElement.appendChild(roleLabel);
         
         const contentElement = document.createElement('div');
-        contentElement.textContent = message.content;
         contentElement.style.whiteSpace = 'pre-wrap';
-        messageElement.appendChild(contentElement);
         
+        // Use HTML for content instead of plain text to preserve formatting
+        contentElement.innerHTML = markdownToHTML(message.content);
+        
+        // Style the HTML content
+        const styleElements = (element: HTMLElement) => {
+          if (element.tagName === 'CODE') {
+            element.style.fontFamily = 'monospace';
+            element.style.backgroundColor = message.role === 'user' ? '#1e40af' : '#e5e7eb';
+            element.style.padding = '2px 4px';
+            element.style.borderRadius = '4px';
+            element.style.fontSize = '0.9em';
+          } else if (element.tagName === 'PRE') {
+            element.style.backgroundColor = message.role === 'user' ? '#1e40af' : '#e5e7eb';
+            element.style.padding = '8px';
+            element.style.borderRadius = '4px';
+            element.style.overflowX = 'auto';
+            element.style.fontFamily = 'monospace';
+            element.style.fontSize = '0.9em';
+          } else if (element.tagName === 'H1' || element.tagName === 'H2' || element.tagName === 'H3') {
+            element.style.fontWeight = 'bold';
+            element.style.marginTop = '10px';
+            element.style.marginBottom = '5px';
+          } else if (element.tagName === 'UL' || element.tagName === 'OL') {
+            element.style.paddingLeft = '20px';
+            element.style.marginTop = '5px';
+            element.style.marginBottom = '5px';
+          }
+          
+          // Recursively style child elements
+          Array.from(element.children).forEach(child => {
+            styleElements(child as HTMLElement);
+          });
+        };
+        
+        // Apply styles to all elements
+        Array.from(contentElement.children).forEach(child => {
+          styleElements(child as HTMLElement);
+        });
+        
+        messageElement.appendChild(contentElement);
         messagesContainer.appendChild(messageElement);
       });
       
@@ -276,36 +370,37 @@ export default function Chat() {
       const imgData = canvas.toDataURL('image/png');
       
       // Calculate dimensions to fit on PDF
-      const imgWidth = 170;
-      const pageHeight = 297;
+      const imgWidth = 190; // Width of the image in the PDF (A4 width is 210mm, leaving margins)
+      const pageHeight = 277; // Height of the printable area on the page (A4 height is 297mm, leaving margins)
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       let heightLeft = imgHeight;
-      let position = 20; // Start position
+      let position = 10; // Start position with margin
       
       // Add first page
-      pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
-      heightLeft -= (pageHeight - position);
+      pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
       
       // Add new pages if content overflows
       while (heightLeft > 0) {
-        position = 20; // Reset position for new pages
+        position = heightLeft - imgHeight;
         pdf.addPage();
         pdf.addImage(
           imgData, 
           'PNG', 
-          20, 
-          position - (pageHeight - 20) * (imgHeight - heightLeft) / imgHeight, 
+          10, // x position with margin
+          position, // y position calculated to show the next part of the image
           imgWidth, 
           imgHeight
         );
-        heightLeft -= (pageHeight - position);
+        heightLeft -= pageHeight;
       }
       
       // Save the PDF
       pdf.save(filename);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error generating PDF:', error);
-      alert(`Failed to generate PDF: ${error.message || 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to generate PDF: ${errorMessage}`);
     } finally {
       setIsGeneratingPDF(false);
     }
