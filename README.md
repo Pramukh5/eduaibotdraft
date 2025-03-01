@@ -26,8 +26,8 @@ An intelligent educational chatbot powered by Puter.js AI that helps users learn
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/eduai-assistant.git
-cd eduai-assistant
+git clone https://github.com/Pramukh5/eduaibotdraft
+cd eduaibotdraft
 ```
 
 2. Install dependencies:
