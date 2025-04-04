@@ -11,7 +11,7 @@ An intelligent educational chatbot powered by Puter.js AI that helps users learn
 - 🎯 Personalized learning paths
 - 🌙 Dark mode support
 - 🎨 Beautiful, responsive UI
-- 🔒 No API keys required - fully client-side
+- 🔒 No API keys required - fully client
 
 ## Tech Stack
 
