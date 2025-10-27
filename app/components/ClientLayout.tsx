@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -8,6 +10,9 @@ interface ClientLayoutProps {
 
 export default function ClientLayout({ children }: ClientLayoutProps) {
   const [isPuterAvailable, setIsPuterAvailable] = useState(true);
+  const { user } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     // Check if Puter.js is available after a short delay
@@ -20,6 +25,13 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
 
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    // Redirect to auth page when user logs out
+    if (user === null && pathname === '/') {
+      router.push('/auth');
+    }
+  }, [user, pathname, router]);
 
   if (!isPuterAvailable) {
     return (
